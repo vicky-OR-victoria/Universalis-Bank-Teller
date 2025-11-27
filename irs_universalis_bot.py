@@ -734,7 +734,7 @@ async def help_finance(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 if __name__ == "__main__":
-    token = os.getenv("DISCORD_BOT_TOKEN")
+    token = os.getenv("MTQ0MzU5MzQwNTg5OTk5NzM1Ng.GTGv6x.F9jOJvOmet_SjLDzWZke_JRa6MCJ6nrrOAKKe8")
     if not token:
         print("Error: DISCORD_BOT_TOKEN not found in environment variables!")
         print("Please set your Discord bot token in the Secrets tab.")
@@ -742,3 +742,4 @@ if __name__ == "__main__":
     
     print("Starting the Universalis Bank Bot...")
     bot.run(token)
+
