@@ -743,6 +743,8 @@ if __name__ == "__main__":
     
     print("Starting the Universalis Bank Bot...")
     bot.run(token)
+print("TOKEN:", repr(token))
+
 
 
 
