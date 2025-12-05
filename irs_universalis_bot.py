@@ -385,7 +385,11 @@ async def cleanup_sessions():
 async def before_cleanup_sessions():
     await bot.wait_until_ready()
 
-cleanup_sessions.start()
+@bot.event
+async def on_ready():
+    if not cleanup_sessions.is_running():
+        cleanup_sessions.start()
+    print("Bot is ready.")
 
 @bot.event
 async def on_ready():
