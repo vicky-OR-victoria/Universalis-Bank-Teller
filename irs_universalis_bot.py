@@ -16,6 +16,64 @@ from discord.ext import commands, tasks
 
 import openai
 
+# Thread memory storage (thread-based memory, persistent)
+THREAD_MEMORY_FILE = "thread_memory.json"
+MAX_MEMORY_MESSAGES = 60  # total messages (user+assistant) per thread to keep; tweak for token/cost
+
+def _ensure_thread_memory_file():
+    if not Path(THREAD_MEMORY_FILE).exists():
+        with open(THREAD_MEMORY_FILE, "w") as f:
+            json.dump({}, f)
+
+def load_thread_memory(thread_id: int) -> List[Dict]:
+    """
+    Returns a list of message dicts (role/content) for the given thread id.
+    """
+    _ensure_thread_memory_file()
+    try:
+        with open(THREAD_MEMORY_FILE, "r") as f:
+            data = json.load(f)
+        items = data.get(str(thread_id), [])
+        # ensure proper format
+        if isinstance(items, list):
+            return items
+        return []
+    except Exception:
+        return []
+
+def save_thread_memory(thread_id: int, messages: List[Dict]):
+    """
+    Persist messages (list of dicts) for given thread id.
+    Trims to MAX_MEMORY_MESSAGES (keep newest).
+    """
+    _ensure_thread_memory_file()
+    try:
+        with open(THREAD_MEMORY_FILE, "r") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+
+    # trim messages to last MAX_MEMORY_MESSAGES
+    trimmed = messages[-MAX_MEMORY_MESSAGES:]
+    data[str(thread_id)] = trimmed
+    with open(THREAD_MEMORY_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+async def fetch_thread_history_from_discord(message: discord.Message, limit: int = 25) -> List[Dict]:
+    """
+    Fetch recent messages directly from Discord (oldest_first) and convert to list of dicts.
+    This is used only to seed memory the first time if a thread has no persisted memory.
+    """
+    msgs = []
+    async for msg in message.channel.history(limit=limit, oldest_first=True):
+        if msg.type.value != 0:
+            continue
+        role = "assistant" if msg.author.bot else "user"
+        content = msg.content or ""
+        # combine attachments or embeds if needed (simple)
+        msgs.append({"role": role, "content": f"{msg.author.display_name}: {content}"})
+    return msgs
+    
 
 # Configuration & Defaults
 SETTINGS_FILE = "settings.json"
@@ -38,7 +96,7 @@ DEFAULT_SETTINGS = {
 # changeable defaults
 DICE_OPTIONS = [10, 12, 20, 25, 50, 100]
 TELLER_NAME = "Kirztin"
-THREAD_HISTORY_LIMIT = 25  # number of recent messages to include in conversation history (tweak to taste)
+THREAD_HISTORY_LIMIT = 60  # number of recent messages to include in conversation history (tweak to taste)
 
 
 # Secrets from environment
@@ -485,6 +543,81 @@ async def on_thread_create(thread: discord.Thread):
             await parent.send(greeting)
         except Exception:
             pass
+
+@bot.event
+async def on_message(message: discord.Message):
+    # ignore bots
+    if message.author.bot:
+        return
+
+    # allow commands to work
+    await bot.process_commands(message)
+
+    # only operate on threads under watched forum
+    if not isinstance(message.channel, discord.Thread):
+        return
+    if message.channel.parent_id != WATCH_FORUM_ID:
+        return
+
+    # build or load memory for this thread
+    thread_id = message.channel.id
+    memory = load_thread_memory(thread_id)
+
+    # if there is no persisted memory yet, seed it from last few Discord messages
+    if not memory:
+        seeded = await fetch_thread_history_from_discord(message, limit=THREAD_HISTORY_LIMIT)
+        # convert seeded history into "user"/"assistant" roles properly (no names in system)
+        memory = []
+        for m in seeded:
+            # Keep the content only (already prefixed with authorname in fetch)
+            memory.append({"role": m["role"], "content": m["content"]})
+
+    # Append incoming user message to the memory list (as user role)
+    user_entry_content = f"{message.author.display_name}: {message.content}"
+    memory.append({"role": "user", "content": user_entry_content})
+
+    # Build the OpenAI messages payload: system prompt + memory
+    messages_for_ai = [{"role": "system", "content": KIRZTIN_SYSTEM_PROMPT}]
+    # append trimmed stored memory (we rely on memory being role/content pairs)
+    for m in memory:
+        # Protect against overly long single entries
+        content = m.get("content", "")
+        if len(content) > 3000:
+            content = content[:3000] + "..."
+        messages_for_ai.append({"role": m.get("role", "user"), "content": content})
+
+    # Now call OpenAI in executor to avoid blocking
+    try:
+        async with message.channel.typing():
+            loop = asyncio.get_running_loop()
+            # call the sync wrapper in executor
+            ai_reply = await loop.run_in_executor(None, openai_chat_completion, messages_for_ai, 700)
+
+            # enforce short replies: if too long, trim to first 6 sentences
+            if ai_reply and len(ai_reply) > 1200:
+                sentences = re.split(r'(?<=[.!?])\s+', ai_reply)
+                ai_reply = " ".join(sentences[:6]) + " ... (reply trimmed; ask for more)"
+
+    except Exception as e:
+        ai_reply = f"⚠️ Error while processing request: {e}"
+
+    # Send the reply
+    try:
+        await message.channel.send(ai_reply)
+    except Exception:
+        try:
+            await message.reply(ai_reply)
+        except Exception:
+            pass
+
+    # Append assistant reply to memory and persist
+    memory.append({"role": "assistant", "content": ai_reply})
+    try:
+        save_thread_memory(thread_id, memory)
+    except Exception:
+        # avoid crashing; log or ignore
+        print(f"Warning: failed to save memory for thread {thread_id}")
+        
 
 @bot.event
 async def on_message(message: discord.Message):
