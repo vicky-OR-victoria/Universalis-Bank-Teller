@@ -688,7 +688,7 @@ async def on_thread_create(thread: discord.Thread):
         f"Please reply in this thread with what you need! Below are what we are open for service. <3\n"
         f"- \"Calculation for your company's taxes.\"\n"
         f"- \"Transfer of funds between companies.\"\n"
-        f"- \"Loan requests."\n\n"
+        f"- \"Loan requests.\"\n"
         f"Just say anything, and I'll respond."
     )
     try:
