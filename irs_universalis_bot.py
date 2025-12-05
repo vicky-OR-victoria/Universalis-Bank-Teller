@@ -702,16 +702,22 @@ async def on_thread_create(thread: discord.Thread):
 
 @bot.event
 async def on_message(message: discord.Message):
-    # Ignore messages from bots
+    # Ignore bot messages
     if message.author.bot:
         return
 
-    # Handle messages in forum threads (very important)
-    if isinstance(message.channel, discord.Thread):
+    # Detect if message is in a forum-thread or normal channel
+    in_thread = isinstance(message.channel, discord.Thread)
+
+    # Decide if bot should respond
+    should_reply = False
+
+    # Respond automatically inside forum threads
+    if in_thread:
         should_reply = True
-    else:
-        # Else reply only when mentioned
-        should_reply = bot.user in message.mentions
+    # Respond in normal channels only when mentioned
+    elif bot.user in message.mentions:
+        should_reply = True
 
     if should_reply:
         try:
@@ -719,7 +725,13 @@ async def on_message(message: discord.Message):
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": "You are Kirztin, a kind and helpful Universalis Bank Teller."},
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are Kirztin, a female, friendly and helpful bank teller from the National Bank of Union of Universalis. "
+                                "Provide financial assistance for loans, taxes, and transfers."
+                            )
+                        },
                         {"role": "user", "content": message.content},
                     ]
                 )
@@ -730,8 +742,8 @@ async def on_message(message: discord.Message):
         except Exception as e:
             await message.reply(f"Error: {e}")
 
-    # Required so slash commands still work
-    await bot.process_commands(message
+    # Allow slash commands to continue working
+    await bot.process_commands(message)
                               
     # restrict interactions to starter or admins
     if session.starter and message.author.id != session.starter.id:
