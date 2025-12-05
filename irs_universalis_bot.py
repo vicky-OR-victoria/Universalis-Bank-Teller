@@ -1,5 +1,5 @@
 # irs_universalis_bot.py
-# Universalis Bank Bot v3.0.6 - Kirztin (full file)
+# Universalis Bank Bot v3.0.7 - Kirztin
 
 import os
 import re
@@ -11,14 +11,13 @@ from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 
 import discord
-discord.opus = None
 from discord import ui, app_commands
 from discord.ext import commands, tasks
 
 import openai
 
 
-# Configuration & defaults
+# Configuration & Defaults
 SETTINGS_FILE = "settings.json"
 DEFAULT_SETTINGS = {
     "tax_brackets": [
@@ -36,11 +35,13 @@ DEFAULT_SETTINGS = {
     ]
 }
 
+# changeable defaults
 DICE_OPTIONS = [10, 12, 20, 25, 50, 100]
 TELLER_NAME = "Kirztin"
+THREAD_HISTORY_LIMIT = 25  # number of recent messages to include in conversation history (tweak to taste)
 
 
-# Load secrets from environment
+# Secrets from environment
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 OPENAI_KEY = os.getenv("OPENAI_KEY")
 ROLE_ID_SECRET = os.getenv("ROLE_ID")
@@ -61,10 +62,11 @@ try:
 except ValueError:
     raise RuntimeError("ROLE_ID and FORUM_ID must be numeric strings convertible to int.")
 
+# Setup OpenAI (legacy usage works fine here)
 openai.api_key = OPENAI_KEY
 
 
-# Settings load/save
+# Settings persistence
 def load_settings():
     if Path(SETTINGS_FILE).exists():
         try:
@@ -87,7 +89,10 @@ settings = load_settings()
 
 # Utilities
 def format_money(amount: float) -> str:
-    return f"${amount:,.2f}"
+    try:
+        return f"${amount:,.2f}"
+    except Exception:
+        return f"${float(amount):,.2f}"
 
 def create_divider() -> str:
     return "─" * 30
@@ -145,8 +150,7 @@ def parse_money_local(text: str) -> Optional[float]:
     return val
 
 
-# Original Calculator code - kept and integrated
-# (CalculatorSession, SessionManager, Modals, CalculatorView, etc.)
+# Calculator: preserved from original file (cleaned)
 class CalculatorSession:
     def __init__(self, user_id: int, channel_id: int, interaction: discord.Interaction):
         self.user_id = user_id
@@ -191,7 +195,7 @@ class SessionManager:
 
 session_manager = SessionManager()
 
-# UI Modals and Views (AddItem, SetExpenses, SetCEO, CalculatorView)
+# UI Modals & View (mostly unchanged behavior)
 class AddItemModal(ui.Modal, title="Add Item/Service"):
     item_name = ui.TextInput(label="Item/Service Name", placeholder="e.g., Apple, Cola, Repair Service", max_length=100, required=True)
     item_price = ui.TextInput(label="Price per Unit", placeholder="e.g., 25.99 or 1000", max_length=20, required=True)
@@ -236,12 +240,10 @@ class AddItemModal(ui.Modal, title="Add Item/Service"):
 
 class SetExpensesModal(ui.Modal, title="Set Business Expenses"):
     expenses = ui.TextInput(label="Total Business Expenses", placeholder="e.g., 5000.00 or 2500", max_length=20, required=True)
-
     def __init__(self, session: CalculatorSession, view: 'CalculatorView'):
         super().__init__()
         self.session = session
         self.calculator_view = view
-
     async def on_submit(self, interaction: discord.Interaction):
         try:
             amount = float(self.expenses.value.replace(',', '').replace('$', ''))
@@ -258,12 +260,10 @@ class SetExpensesModal(ui.Modal, title="Set Business Expenses"):
 
 class SetCEOPercentModal(ui.Modal, title="Set CEO Salary Percentage"):
     percentage = ui.TextInput(label="Percentage of CEO Salary (1-100)", placeholder="e.g., 50 or 100", max_length=3, required=True)
-
     def __init__(self, session: CalculatorSession, view: 'CalculatorView'):
         super().__init__()
         self.session = session
         self.calculator_view = view
-
     async def on_submit(self, interaction: discord.Interaction):
         try:
             percent = int(self.percentage.value.replace('%', ''))
@@ -397,221 +397,7 @@ class CalculatorView(ui.View):
             )
             embed.add_field(name="Assessment",
                             value="*\"Oh dear, it looks like your expenses exceeded your earnings this period. Don't worry though - no taxes or salary deductions apply when there's no profit. Let me know if you need any help planning for next quarter!\"*",
-                            inline=False)
-            embed.set_footer(text="Universalis Bank | Here to help your business thrive")
-            return embed
-
-        business_tax, business_breakdown = calculate_progressive_tax(net_profit, business_brackets)
-        profit_after_tax = net_profit - business_tax
-
-        if self.session.include_ceo_salary:
-            gross_ceo_salary = profit_after_tax * (effective_ceo_rate / 100)
-            ceo_tax, ceo_breakdown = calculate_progressive_tax(gross_ceo_salary, ceo_brackets)
-            net_ceo_salary = gross_ceo_salary - ceo_tax
-            final_profit = profit_after_tax - gross_ceo_salary
-        else:
-            gross_ceo_salary = 0
-            ceo_tax = 0
-            net_ceo_salary = 0
-            ceo_breakdown = []
-            final_profit = profit_after_tax
-
-        business_effective_rate = (business_tax / net_profit * 100) if net_profit > 0 else 0
-        ceo_effective_rate = (ceo_tax / gross_ceo_salary * 100) if gross_ceo_salary > 0 else 0
-
-        embed = discord.Embed(title="Universalis Bank",
-                              description="*The bank teller smiles warmly as she prepares your detailed financial report...*",
-                              color=discord.Color.from_rgb(255, 193, 7))
-
-        sales_text = ""
-        for item in self.session.items:
-            revenue = item["price"] * item["quantity"]
-            sales_text += f"🎲 {item['name']}\n   d{item['dice']} → {item['quantity']} units @ {format_money(item['price'])} = {format_money(revenue)}\n"
-
-        embed.add_field(name="Sales Results (Dice Rolls)", value=sales_text, inline=False)
-        embed.add_field(name="Revenue Overview",
-                        value=(f"```\nGross Revenue:   {format_money(gross_profit):>15}\nGross Expenses:  {format_money(gross_expenses):>15}\n{create_divider()}\nNet Profit:      {format_money(net_profit):>15}\n```"),
-                        inline=False)
-
-        business_tax_text = ""
-        for item in business_breakdown:
-            bracket_range = format_bracket_range(item["min"], item["max"])
-            business_tax_text += f"{bracket_range} @ {item['rate']}%\n   Tax: {format_money(item['tax'])}\n"
-        business_tax_text += f"\nTotal: {format_money(business_tax)}"
-
-        embed.add_field(name="Business Income Tax", value=f"```\n{business_tax_text}\n```", inline=False)
-        embed.add_field(name="After Business Tax",
-                        value=(f"```\nNet Profit:      {format_money(net_profit):>15}\nBusiness Tax:   -{format_money(business_tax):>15}\n{create_divider()}\nRemaining:       {format_money(profit_after_tax):>15}\n```"),
-                        inline=False)
-
-        if self.session.include_ceo_salary:
-            embed.add_field(
-                name=f"CEO Compensation ({self.session.ceo_salary_multiplier}% of {ceo_base_rate}% = {effective_ceo_rate:.1f}%)",
-                value=(f"```\nGross CEO Salary: {format_money(gross_ceo_salary):>14}\n```"),
-                inline=False
-            )
-            ceo_tax_text = ""
-            for item in ceo_breakdown:
-                bracket_range = format_bracket_range(item["min"], item["max"])
-                ceo_tax_text += f"{bracket_range} @ {item['rate']}%\n   Tax: {format_money(item['tax'])}\n"
-            ceo_tax_text += f"\nTotal: {format_money(ceo_tax)}"
-            embed.add_field(name="CEO Income Tax", value=f"```\n{ceo_tax_text}\n```", inline=False)
-            embed.add_field(name="CEO Take-Home",
-                            value=(f"```\nGross Salary:    {format_money(gross_ceo_salary):>15}\nCEO Tax:        -{format_money(ceo_tax):>15}\n{create_divider()}\nNet Salary:      {format_money(net_ceo_salary):>15}\n```"),
-                            inline=False)
-
-        embed.add_field(name="Final Business Summary",
-                        value=(f"```\nProfit After Tax: {format_money(profit_after_tax):>14}\nCEO Salary:      -{format_money(gross_ceo_salary):>14}\n{create_divider()}\nBusiness Profit:  {format_money(final_profit):>14}\n```"),
-                        inline=False)
-
-        total_taxes = business_tax + ceo_tax
-        embed.add_field(
-            name="Summary",
-            value=(f"*\"Wonderful news! Here's your complete breakdown:*\n\n"
-                   f"*Business paid **{format_money(business_tax)}** in taxes.*\n"
-                   f"*CEO receives **{format_money(net_ceo_salary)}** after their personal tax of **{format_money(ceo_tax)}**.*\n"
-                   f"*The business retains **{format_money(final_profit)}**.*\n\n"
-                   f"*Total taxes collected: **{format_money(total_taxes)}**. You're doing great!\"*"),
-            inline=False
-        )
-        embed.set_footer(text="Universalis Bank | Here to help your business thrive")
-        return embed
-
-
-# Thread-based Kirztin system
-class ThreadSession:
-    def __init__(self, thread: discord.Thread, starter: Optional[discord.Member]):
-        self.thread = thread
-        self.thread_id = thread.id
-        self.starter = starter
-        self.created_at = datetime.utcnow()
-        self.last_activity = datetime.utcnow()
-        self.timeout_minutes = 30
-        self.state = "AWAITING_CHOICE"  # AWAITING_CHOICE, COMPANY_MENU, TAX_COLLECTING, TRANSFER_COLLECTING, LOAN_COLLECTING, FINISHED
-        self.substate = None
-        self.company_data = {"company_name": None, "player_name": None, "income": None, "expenses": None, "period": None, "modifiers": None}
-        self.transfer_data = {"source": None, "destination": None, "amount": None, "reason": None}
-        self.loan_data = {"player_name": None, "amount": None, "purpose": None, "collateral": None}
-        self.messages: List[tuple] = []
-
-    def touch(self):
-        self.last_activity = datetime.utcnow()
-
-    def is_expired(self) -> bool:
-        return datetime.utcnow() > self.last_activity + timedelta(minutes=self.timeout_minutes)
-
-class ThreadSessionManager:
-    def __init__(self):
-        self.sessions: Dict[int, ThreadSession] = {}
-
-    def create(self, thread: discord.Thread, starter: Optional[discord.Member]) -> ThreadSession:
-        session = ThreadSession(thread, starter)
-        self.sessions[thread.id] = session
-        return session
-
-    def get(self, thread_id: int) -> Optional[ThreadSession]:
-        session = self.sessions.get(thread_id)
-        if session and session.is_expired():
-            del self.sessions[thread_id]
-            return None
-        return session
-
-    def remove(self, thread_id: int):
-        if thread_id in self.sessions:
-            del self.sessions[thread_id]
-
-    def cleanup(self):
-        expired = [tid for tid, s in self.sessions.items() if s.is_expired()]
-        for tid in expired:
-            del self.sessions[tid]
-
-thread_manager = ThreadSessionManager()
-
-
-# OpenAI parser helper async
-async def ask_openai_for_intent(user_message: str) -> dict:
-    system_prompt = (
-        "You are a JSON-output assistant that extracts structured intent from a single user message "
-        "for a female banking NPC named Kirztin. Return a JSON object and nothing else with keys:\n"
-        " - intent: one of 'tax','transfer','loan','choice','finish','unknown'\n"
-        " - fields: an object with any parsed fields (company_name, player_name, income, expenses, period, modifiers, source, destination, amount, reason, purpose, collateral, choice)\n"
-        "If you cannot determine structured data, set intent to 'unknown' and fields to {}."
-    )
-    user_prompt = f"User message:\n{user_message}\n\nReturn JSON only."
-
-    try:
-        resp = await openai.ChatCompletion.acreate(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.0,
-            max_tokens=400
-        )
-        text = resp.choices[0].message.content.strip()
-        # strip code fences and extract JSON object
-        text = re.sub(r"^```(?:json)?\n", "", text)
-        text = re.sub(r"\n```$", "", text)
-        first = text.find("{")
-        last = text.rfind("}")
-        if first != -1 and last != -1:
-            json_text = text[first:last+1]
-        else:
-            json_text = text
-        parsed = json.loads(json_text)
-        return parsed
-    except Exception:
-        return {"intent": "unknown", "fields": {}}
-
-
-# Report generators (thread flows)
-def generate_tax_report_embed(company_data: dict) -> discord.Embed:
-    income = float(company_data.get("income") or 0.0)
-    expenses = float(company_data.get("expenses") or 0.0)
-    cname = company_data.get("company_name") or "Unknown Company"
-    pname = company_data.get("player_name") or "Unknown Player"
-    period = company_data.get("period") or "Period"
-
-    net_profit = income - expenses
-    embed = discord.Embed(title="UNIVERSALIS BANK — Tax Assessment Report",
-                          description=f"*{TELLER_NAME} prepares your tax assessment for {cname} ({pname}) — {period}*",
-                          color=discord.Color.from_rgb(255, 193, 7),
-                          timestamp=datetime.utcnow())
-    embed.add_field(name="Overview", value=(f"**Company:** {cname}\n**Client:** {pname}\n**Period:** {period}\n**Gross Income:** {format_money(income)}\n**Expenses:** {format_money(expenses)}\n"), inline=False)
-
-    if net_profit <= 0:
-        embed.add_field(name="Result", value=f"Net Profit: {format_money(net_profit)}\n\n*No business income tax applies when there is no profit.*", inline=False)
-        embed.set_footer(text=f"Teller: {TELLER_NAME} | Universalis Bank")
-        return embed
-
-    business_tax, breakdown = calculate_progressive_tax(net_profit, settings["tax_brackets"])
-    profit_after_tax = net_profit - business_tax
-
-    btxt = ""
-    for b in breakdown:
-        rng = format_bracket_range(b["min"], b["max"])
-        btxt += f"{rng} @ {b['rate']}%\n   Tax: {format_money(b['tax'])}\n"
-    btxt += f"\nTotal Business Tax: {format_money(business_tax)}"
-
-    embed.add_field(name="Tax Calculation", value=f"```\nNet Profit: {format_money(net_profit)}\n\n{btxt}\n```", inline=False)
-    embed.add_field(name="After Tax", value=f"```\nProfit After Tax: {format_money(profit_after_tax)}\n```", inline=False)
-    embed.set_footer(text=f"Teller: {TELLER_NAME} | Universalis Bank")
-    return embed
-
-def generate_transfer_report_embed(transfer: dict) -> discord.Embed:
-    src = transfer.get("source") or "Unknown"
-    dst = transfer.get("destination") or "Unknown"
-    amount = float(transfer.get("amount") or 0.0)
-    reason = transfer.get("reason") or "No reason provided"
-    e = discord.Embed(title="UNIVERSALIS BANK — Transfer Report",
-                      description=f"*{TELLER_NAME} processes the transfer...*",
-                      color=discord.Color.from_rgb(0, 123, 255),
-                      timestamp=datetime.utcnow())
-    e.add_field(name="Details", value=f"**From:** {src}\n**To:** {dst}\n**Amount:** {format_money(amount)}\n**Reason:** {reason}\n", inline=False)
-    e.add_field(name="Status", value="✔️ Completed", inline=False)
-    e.set_footer(text=f"Teller: {TELLER_NAME} | Universalis Bank")
-    return e
+       return e
 
 def generate_loan_notice_embed(loan: dict, requester: discord.Member) -> discord.Embed:
     pname = loan.get("player_name") or "Unknown"
@@ -1098,9 +884,6 @@ async def view_rates(interaction: discord.Interaction):
     embed.set_footer(text="Use /calculate to run your private calculator!")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# Admin bracket commands (set_bracket, remove_bracket, set_ceo_bracket, remove_ceo_bracket, set_ceo_salary)
-# These are retained from your original code (kept for brevity but functional).
-# Implementing the full admin commands verbatim used earlier is straightforward; include them below per your prior code.
 
 # For example:
 @bot.tree.command(name="set_bracket", description="[ADMIN] Set or update a business tax bracket")
@@ -1170,7 +953,7 @@ async def on_message(message: discord.Message):
         except Exception as e:
             await message.reply(f"Error: {e}")
 
-    # VERY IMPORTANT: process commands too
+    # VERY IMPORTANT
     await bot.process_commands(message)
 
 @bot.event
