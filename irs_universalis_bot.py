@@ -685,11 +685,11 @@ async def on_thread_create(thread: discord.Thread):
     greeting = (
         f"👋 **Welcome to Universalis Bank.**\n"
         f"I am **{TELLER_NAME}**, your virtual bank teller. How may I assist you today?\n\n"
-        f"Please reply in this thread with what you need (examples):\n"
-        f"- \"Calculate company taxes for [CompanyName]: income 12k, expenses 3k\"\n"
-        f"- \"Transfer 2.5k from CompanyName to PlayerName for payout\"\n"
-        f"- \"Request a loan of 5k for colony expansion\"\n\n"
-        f"I can understand natural requests — just type them and I'll respond."
+        f"Please reply in this thread with what you need! Below are what we are open for service. <3\n"
+        f"- \"Calculation for your company's taxes.\"\n"
+        f"- \"Transfer of funds between companies.\"\n"
+        f"- \"Loan requests."\n\n"
+        f"Just say anything, and I'll respond."
     )
     try:
         await thread.send(greeting)
@@ -1087,6 +1087,33 @@ def format_bracket_range(min_val: float, max_val) -> str:
     if max_val is None or max_val == float('inf'):
         return f"${min_val:,.0f}+"
     return f"${min_val:,.0f} - ${max_val:,.0f}"
+
+@bot.event
+async def on_message(message: discord.Message):
+    # Ignore bot messages
+    if message.author.bot:
+        return
+
+    # Only reply when the bot is mentioned
+    if bot.user in message.mentions:
+        try:
+            # typing indicator
+            async with message.channel.typing():
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are Kirztin, a friendly and helpful Universalis Bank teller. You speak politely, warmly, and in character."},
+                        {"role": "user", "content": message.content}
+                    ],
+                )
+
+                reply = response.choices[0].message["content"]
+                await message.reply(reply)
+        except Exception as e:
+            await message.reply(f"Error: {e}")
+
+    # VERY IMPORTANT: process commands too
+    await bot.process_commands(message)
 
 
 # Run the bot
