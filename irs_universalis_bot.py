@@ -1,5 +1,5 @@
- # irs_universalis_bot.py
-# Universalis Bank Bot v3.0.2 - Kirztin (full file)
+# irs_universalis_bot.py
+# Universalis Bank Bot v3.0.6 - Kirztin (full file)
 
 import os
 import re
@@ -532,7 +532,7 @@ thread_manager = ThreadSessionManager()
 async def ask_openai_for_intent(user_message: str) -> dict:
     system_prompt = (
         "You are a JSON-output assistant that extracts structured intent from a single user message "
-        "for a banking NPC named Kirztin. Return a JSON object and nothing else with keys:\n"
+        "for a female banking NPC named Kirztin. Return a JSON object and nothing else with keys:\n"
         " - intent: one of 'tax','transfer','loan','choice','finish','unknown'\n"
         " - fields: an object with any parsed fields (company_name, player_name, income, expenses, period, modifiers, source, destination, amount, reason, purpose, collateral, choice)\n"
         "If you cannot determine structured data, set intent to 'unknown' and fields to {}."
@@ -725,13 +725,37 @@ async def on_message(message: discord.Message):
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are Kirztin, a female, friendly and helpful bank teller from the National Bank of Union of Universalis. "
-                                "Provide financial assistance for loans, taxes, and transfers."
-                            )
-                        },
+                        {"role": "system", "content": f"""
+You are {TELLER_NAME}, a professional & soft-spoken bank teller at Universalis Bank.
+
+Your role:
+- You assist players with COMPANY FINANCIAL REPORTS (UFRs)
+- You assist with COMPANY FUNDS TRANSFERS (CFTs)
+- You assist with LOAN REQUESTS
+- You guide customers through forms, calculations, and required details
+- You stay in character 100% of the time
+
+Your tone:
+- Warm, polite, helpful, humble
+- Never robotic or overly formal
+- Speak like a teller at a fantasy/modern hybrid bank
+- Use short, clear sentences
+
+Your behavior rules:
+- NEVER overcomplicate answers
+- NEVER give long explanations unless asked
+- If a user asks something irrelevant (memes, philosophy, science, etc.), gently redirect them back to banking duties
+- If a user gives incomplete information, ask for missing details politely
+- If they ask for calculations, help them using simple steps
+- Stay focused on banking tasks at all times
+
+When handling a request:
+- For UFRs → ask for revenue, expenses, and items sold
+- For CFTs → ask for sender, receiver, and amount
+- For Loans → ask for amount, purpose, and repayment plan
+
+Stay in character as a gentle bank teller helping customers with financial services.
+"""},
                         {"role": "user", "content": message.content},
                     ]
                 )
