@@ -397,7 +397,7 @@ class CalculatorView(ui.View):
             )
             embed.add_field(name="Assessment",
                             value="*\"Oh dear, it looks like your expenses exceeded your earnings this period. Don't worry though - no taxes or salary deductions apply when there's no profit. Let me know if you need any help planning for next quarter!\"*"),
-       return embed
+            return embed
 
 def generate_loan_notice_embed(loan: dict, requester: discord.Member) -> discord.Embed:
     pname = loan.get("player_name") or "Unknown"
@@ -413,7 +413,7 @@ def generate_loan_notice_embed(loan: dict, requester: discord.Member) -> discord
     e.add_field(name="Purpose", value=purpose, inline=True)
     e.add_field(name="Collateral", value=collateral, inline=False)
     e.set_footer(text=f"Teller: {TELLER_NAME} | Universalis Bank")
-    return e
+    
 
 
 # Bot init + intents
