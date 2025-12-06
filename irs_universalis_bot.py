@@ -471,8 +471,237 @@ def generate_loan_notice_embed(loan: dict, requester: discord.Member) -> discord
     e.add_field(name="Purpose", value=purpose, inline=True)
     e.add_field(name="Collateral", value=collateral, inline=False)
     e.set_footer(text=f"Teller: {TELLER_NAME} | Universalis Bank")
-    
+    return e
 
+def generate_tax_report_embed(data: dict) -> discord.Embed:
+    company_name = data.get("company_name", "Unknown Company")
+    player_name = data.get("player_name", "Unknown Player")
+    income = float(data.get("income") or 0.0)
+    expenses = float(data.get("expenses") or 0.0)
+    period = data.get("period", "Unspecified Period")
+    modifiers = data.get("modifiers", "None")
+    
+    net_profit = income - expenses
+    
+    if net_profit <= 0:
+        embed = discord.Embed(
+            title="UNIVERSALIS BANK — Tax Report (No Tax)",
+            description="*The bank teller reviews the numbers with a sympathetic smile...*",
+            color=discord.Color.from_rgb(220, 53, 69),
+            timestamp=datetime.utcnow()
+        )
+        embed.add_field(name="Company", value=company_name, inline=True)
+        embed.add_field(name="Player", value=player_name, inline=True)
+        embed.add_field(name="Period", value=period, inline=True)
+        embed.add_field(
+            name="Financial Summary",
+            value=f"```\nGross Income:    {format_money(income):>15}\nGross Expenses:  {format_money(expenses):>15}\n{create_divider()}\nNet Profit:      {format_money(net_profit):>15}\n```",
+            inline=False
+        )
+        embed.add_field(
+            name="Assessment",
+            value="*\"No profit this period means no tax liability. Better luck next time!\"*",
+            inline=False
+        )
+        embed.set_footer(text=f"Teller: {TELLER_NAME} | Universalis Bank")
+        return embed
+    
+    tax_amount, tax_breakdown = calculate_progressive_tax(net_profit, settings["tax_brackets"])
+    after_tax_profit = net_profit - tax_amount
+    
+    embed = discord.Embed(
+        title="UNIVERSALIS BANK — Tax Report",
+        description="*The bank teller calculates your taxes with precision...*",
+        color=discord.Color.from_rgb(0, 123, 255),
+        timestamp=datetime.utcnow()
+    )
+    embed.add_field(name="Company", value=company_name, inline=True)
+    embed.add_field(name="Player", value=player_name, inline=True)
+    embed.add_field(name="Period", value=period, inline=True)
+    embed.add_field(
+        name="Financial Summary",
+        value=f"```\nGross Income:    {format_money(income):>15}\nGross Expenses:  {format_money(expenses):>15}\n{create_divider()}\nNet Profit:      {format_money(net_profit):>15}\nTax Owed:        {format_money(tax_amount):>15}\n{create_divider()}\nAfter-Tax:       {format_money(after_tax_profit):>15}\n```",
+        inline=False
+    )
+    if modifiers and modifiers.lower() not in ("none", "no", "n/a"):
+        embed.add_field(name="Modifiers", value=modifiers, inline=False)
+    embed.set_footer(text=f"Teller: {TELLER_NAME} | Universalis Bank")
+    return embed
+
+def generate_transfer_report_embed(data: dict) -> discord.Embed:
+    source = data.get("source", "Unknown Source")
+    destination = data.get("destination", "Unknown Destination")
+    amount = float(data.get("amount") or 0.0)
+    reason = data.get("reason", "No reason provided")
+    
+    embed = discord.Embed(
+        title="UNIVERSALIS BANK — Company Fund Transfer",
+        description="*The bank teller prepares your transfer document...*",
+        color=discord.Color.from_rgb(40, 167, 69),
+        timestamp=datetime.utcnow()
+    )
+    embed.add_field(name="Source", value=source, inline=True)
+    embed.add_field(name="Destination", value=destination, inline=True)
+    embed.add_field(name="Amount", value=format_money(amount), inline=True)
+    embed.add_field(name="Reason", value=reason, inline=False)
+    embed.add_field(
+        name="Confirmation",
+        value=f"*\"Transfer of {format_money(amount)} from {source} to {destination} has been documented. Please execute this transfer in-game and keep this record.\"*",
+        inline=False
+    )
+    embed.set_footer(text=f"Teller: {TELLER_NAME} | Universalis Bank")
+    return embed
+
+class ThreadSession:
+    def __init__(self, thread: discord.Thread, starter: Optional[discord.Member]):
+        self.thread_id = thread.id
+        self.thread = thread
+        self.starter = starter
+        self.created_at = datetime.utcnow()
+        self.last_activity = datetime.utcnow()
+        self.state = "INITIAL"
+        self.substate = None
+        self.messages = []
+        self.company_data = {
+            "company_name": None,
+            "player_name": None,
+            "income": None,
+            "expenses": None,
+            "period": None,
+            "modifiers": None
+        }
+        self.transfer_data = {
+            "source": None,
+            "destination": None,
+            "amount": None,
+            "reason": None
+        }
+        self.loan_data = {
+            "player_name": None,
+            "amount": None,
+            "purpose": None,
+            "collateral": None
+        }
+    
+    def touch(self):
+        self.last_activity = datetime.utcnow()
+    
+    def is_expired(self, minutes: int = 30) -> bool:
+        return datetime.utcnow() > self.last_activity + timedelta(minutes=minutes)
+
+class ThreadManager:
+    def __init__(self):
+        self.sessions: Dict[int, ThreadSession] = {}
+    
+    def create(self, thread: discord.Thread, starter: Optional[discord.Member]) -> ThreadSession:
+        session = ThreadSession(thread, starter)
+        self.sessions[thread.id] = session
+        return session
+    
+    def get(self, thread_id: int) -> Optional[ThreadSession]:
+        return self.sessions.get(thread_id)
+    
+    def remove(self, thread_id: int):
+        if thread_id in self.sessions:
+            del self.sessions[thread_id]
+    
+    def cleanup(self):
+        expired = [tid for tid, s in self.sessions.items() if s.is_expired()]
+        for tid in expired:
+            self.remove(tid)
+
+thread_manager = ThreadManager()
+
+# AI Prompt for OpenAI Kirztin
+KIRZTIN_SYSTEM_PROMPT = f"""
+You are {TELLER_NAME}, an AI assistant built for a Discord roleplay economy. You have two primary functions: Financial Reporting and Loan Processing. Follow the instructions below exactly.
+
+------------------------------------------------------------
+1. FINANCIAL REPORT FUNCTION
+------------------------------------------------------------
+When a user requests a financial report, follow this workflow:
+
+Step 1: Ask the user for the company's gross revenue.
+Step 2: Ask the user for the company's gross expenses.
+
+After receiving both values, ask:
+"Would you like to include a CEO salary percentage deducted from the company's net profit after taxes? If yes, provide the percentage."
+
+TAX RULES:
+- Taxes are progressive.
+- Tax brackets are adjustable depending on the user's Discord rank.
+- Taxes apply to gross profit (gross revenue - gross expenses).
+
+After collecting the information, calculate and produce a formatted financial report containing:
+- Gross Revenue
+- Gross Expenses
+- Gross Profit
+- Tax Amount
+- Net Profit After Taxes
+- CEO Salary Deduction (if provided)
+- Final Profit After All Deductions
+
+Explain the math transparently.
+
+------------------------------------------------------------
+2. LOAN APPLICATION FUNCTION
+------------------------------------------------------------
+When a user requests a loan application or asks to apply for a loan:
+
+Step 1: Ask for:
+- Desired loan amount
+- Purpose of the loan
+- Desired repayment term
+- Any additional details required by the server
+
+Step 2: Summarize the application in a formatted block.
+
+Step 3: Ping the appropriate Discord roles responsible for reviewing or approving loans. (Roles are server-defined.)
+
+Step 4: Inform the user that the request has been submitted for review.
+
+------------------------------------------------------------
+GENERAL BEHAVIOR RULES
+------------------------------------------------------------
+- Maintain a professional, roleplay-friendly tone unless asked otherwise.
+- Never skip required steps when gathering financial or loan data.
+- Always confirm user inputs before performing calculations.
+- Follow Discord-friendly formatting.
+- If user inputs are unclear or invalid, request clarification."""
+
+def openai_chat_completion(messages: List[Dict], max_tokens: int = 500) -> str:
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            max_tokens=max_tokens
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error: {e}"
+
+async def ask_openai_for_intent(user_message: str) -> dict:
+    prompt = f"""Parse this user message and extract intent and fields:
+User: {user_message}
+
+Return JSON with:
+- intent: one of "tax", "transfer", "loan", "choice", "finish", "unknown"
+- fields: dict with any of company_name, player_name, income, expenses, source, destination, amount, purpose, collateral, choice
+
+Example: {{"intent": "tax", "fields": {{"company_name": "IronWorks", "income": 12000, "expenses": 3000}}}}
+"""
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "system", "content": "You are a JSON parser. Return only valid JSON."}, {"role": "user", "content": prompt}],
+            max_tokens=200
+        )
+        result_text = response.choices[0].message.content.strip()
+        return json.loads(result_text)
+    except Exception:
+        return {"intent": "unknown", "fields": {}}
+
+client = openai.OpenAI(api_key=OPENAI_KEY)
 
 # Bot init + intents
 intents = discord.Intents.default()
@@ -619,362 +848,6 @@ async def on_message(message: discord.Message):
         print(f"Warning: failed to save memory for thread {thread_id}")
         
 
-@bot.event
-async def on_message(message: discord.Message):
-    # Ignore bot messages
-    if message.author.bot:
-        return
-
-    # Detect if message is in a forum-thread or normal channel
-    in_thread = isinstance(message.channel, discord.Thread)
-
-    # Decide if bot should respond
-    should_reply = False
-
-    # Respond automatically inside forum threads
-    if in_thread:
-        should_reply = True
-    # Respond in normal channels only when mentioned
-    elif bot.user in message.mentions:
-        should_reply = True
-
-    if should_reply:
-        try:
-            async with message.channel.typing():
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": f"""
-You are {TELLER_NAME}, a professional & soft-spoken bank teller at Universalis Bank.
-
-Your role:
-- You assist players with COMPANY FINANCIAL REPORTS (UFRs)
-- You assist with COMPANY FUNDS TRANSFERS (CFTs)
-- You assist with LOAN REQUESTS
-- You guide customers through forms, calculations, and required details
-- You stay in character 100% of the time
-
-Your tone:
-- Warm, polite, helpful, humble
-- Never robotic or overly formal
-- Speak like a teller at a fantasy/modern hybrid bank
-- Use short, clear sentences
-
-Your behavior rules:
-- NEVER overcomplicate answers
-- NEVER give long explanations unless asked
-- If a user asks something irrelevant (memes, philosophy, science, etc.), gently redirect them back to banking duties
-- If a user gives incomplete information, ask for missing details politely
-- If they ask for calculations, help them using simple steps
-- Stay focused on banking tasks at all times
-
-When handling a request:
-- For UFRs → ask for revenue, expenses, and items sold
-- For CFTs → ask for sender, receiver, and amount
-- For Loans → ask for amount, purpose, and repayment plan
-
-Stay in character as a gentle bank teller helping customers with financial services.
-"""},
-                        {"role": "user", "content": message.content},
-                    ]
-                )
-
-            reply = response.choices[0].message["content"]
-            await message.reply(reply)
-
-        except Exception as e:
-            await message.reply(f"Error: {e}")
-
-    # Allow slash commands to continue working
-    await bot.process_commands(message)
-                              
-    # restrict interactions to starter or admins
-    if session.starter and message.author.id != session.starter.id:
-        member = message.author
-        if message.guild and isinstance(member, discord.Member) and member.guild_permissions.administrator:
-            pass
-        else:
-            try:
-                await channel.send("*Kirztin says: Only the thread starter may interact with this session, or ask an admin for assistance.*")
-            except Exception:
-                pass
-            return
-
-    session.touch()
-    session.messages.append((message.author.id, message.content, datetime.utcnow()))
-
-    # Use OpenAI to interpret the message (with quick fallback heuristics)
-    parsed = await ask_openai_for_intent(message.content)
-    intent = parsed.get("intent", "unknown")
-    fields = parsed.get("fields", {})
-
-    # quick keyword mapping for simple replies
-    low = message.content.strip().lower()
-    if low in ("a", "company", "company services"):
-        intent = "choice"
-        fields = {"choice": "company"}
-    elif low in ("b", "loan", "loan request"):
-        intent = "choice"
-        fields = {"choice": "loan"}
-    elif any(k in low for k in ("tax", "calculate", "taxes")):
-        intent = "tax"
-    elif any(k in low for k in ("transfer", "move")):
-        intent = "transfer"
-    elif low in ("finish", "calculate", "report"):
-        intent = "finish"
-
-    # handle choices
-    if intent == "choice" and fields.get("choice") == "company":
-        session.state = "COMPANY_MENU"
-        await channel.send(f"*\"Excellent. Company Services it is. Would you like 'tax' (calculate taxes) or 'transfer' (company transfer)?\"*")
-        return
-    if intent == "choice" and fields.get("choice") == "loan":
-        session.state = "LOAN_COLLECTING"
-        session.substate = "ASK_NAME"
-        await channel.send(f"*\"A loan request — understood. To begin, what's your character name?\"*")
-        return
-
-    # TAX intent: fill fields, ask for missing info, produce report
-    if intent == "tax":
-        session.state = "TAX_COLLECTING"
-        # fill session data from fields if present
-        for key in ("company_name", "player_name", "income", "expenses", "period", "modifiers"):
-            if key in fields and fields[key] is not None:
-                if key in ("income", "expenses"):
-                    try:
-                        val = float(fields[key])
-                    except Exception:
-                        # attempt local parse
-                        val = parse_money_local(str(fields[key]))
-                    session.company_data[key] = val
-                else:
-                    session.company_data[key] = fields[key]
-        # ask in sequence for missing
-        if not session.company_data["company_name"]:
-            session.substate = "ASK_COMPANY"
-            await channel.send(f"*\"Very well — Tax calculation. What is the company name?\"*")
-            return
-        if not session.company_data["player_name"]:
-            session.substate = "ASK_PLAYER"
-            await channel.send(f"*\"What is the character/player name?\"*")
-            return
-        if session.company_data["income"] is None:
-            session.substate = "ASK_INCOME"
-            await channel.send(f"*\"What is the gross income for the period? (e.g., 12k or 12000)\"*")
-            return
-        if session.company_data["expenses"] is None:
-            session.substate = "ASK_EXPENSES"
-            await channel.send(f"*\"How much in expenses? (enter 0 if none)\"*")
-            return
-        # all present -> generate report
-        embed = generate_tax_report_embed(session.company_data)
-        await channel.send(embed=embed)
-        session.state = "FINISHED"
-        thread_manager.remove(channel.id)
-        return
-
-    # TAX flow mid-steps
-    if session.state == "TAX_COLLECTING":
-        sub = session.substate
-        if sub == "ASK_COMPANY":
-            session.company_data["company_name"] = message.content.strip()
-            session.substate = "ASK_PLAYER"
-            await channel.send(f"*\"Recorded company name as **{session.company_data['company_name']}**. What is the character/player name?\"*")
-            return
-        if sub == "ASK_PLAYER":
-            session.company_data["player_name"] = message.content.strip()
-            session.substate = "ASK_INCOME"
-            await channel.send(f"*\"Great. What is the gross income for the period? (e.g., 12000 or 12k)\"*")
-            return
-        if sub == "ASK_INCOME":
-            parsed = parse_money_local(message.content)
-            if parsed is None:
-                await channel.send(f"*\"I couldn't parse that amount — please enter a number like 12000 or 12k (you may use 'k' or 'm').\"*")
-                return
-            session.company_data["income"] = parsed
-            session.substate = "ASK_EXPENSES"
-            await channel.send(f"*\"Income recorded: {format_money(parsed)}. What are the total expenses? (enter 0 if none)\"*")
-            return
-        if sub == "ASK_EXPENSES":
-            parsed = parse_money_local(message.content)
-            if parsed is None:
-                await channel.send(f"*\"I couldn't parse that amount — please enter a number like 5000 or 5k.\"*")
-                return
-            session.company_data["expenses"] = parsed
-            session.substate = "ASK_PERIOD"
-            await channel.send(f"*\"Expenses recorded: {format_money(parsed)}. What is the fiscal period? (e.g., 'This month', 'Q3 1425')\"*")
-            return
-        if sub == "ASK_PERIOD":
-            session.company_data["period"] = message.content.strip()
-            session.substate = "ASK_MODIFIERS"
-            await channel.send(f"*\"Any modifiers or special notes? (e.g., 'charity deduction 10%' or reply 'no')\"*")
-            return
-        if sub == "ASK_MODIFIERS":
-            session.company_data["modifiers"] = message.content.strip()
-            session.substate = "READY"
-            summary = (
-                f"**Summary so far:**\n"
-                f"- Company: {session.company_data['company_name']}\n"
-                f"- Player: {session.company_data['player_name']}\n"
-                f"- Income: {format_money(session.company_data['income'])}\n"
-                f"- Expenses: {format_money(session.company_data['expenses'])}\n"
-                f"- Period: {session.company_data['period']}\n"
-                f"- Modifiers: {session.company_data['modifiers']}\n\n"
-                f"Type `calculate` or `finish` to get the full tax report."
-            )
-            await channel.send(f"*\"All set. {summary}\"*")
-            return
-
-    # TRANSFER intent
-    if intent == "transfer":
-        session.state = "TRANSFER_COLLECTING"
-        for key in ("source", "destination", "amount", "reason"):
-            if key in fields and fields[key] is not None:
-                if key == "amount":
-                    try:
-                        session.transfer_data[key] = float(fields[key])
-                    except Exception:
-                        session.transfer_data[key] = parse_money_local(str(fields[key]))
-                else:
-                    session.transfer_data[key] = fields[key]
-        if not session.transfer_data["source"]:
-            session.substate = "ASK_SOURCE"
-            await channel.send(f"*\"Understood — Company Transfer. Who is the source of funds? (e.g., CompanyName or PlayerName)\"*")
-            return
-        if not session.transfer_data["destination"]:
-            session.substate = "ASK_DEST"
-            await channel.send(f"*\"Who is the destination?\"*")
-            return
-        if session.transfer_data["amount"] is None:
-            session.substate = "ASK_AMOUNT"
-            await channel.send(f"*\"How much would you like to transfer?\"*")
-            return
-        # all present
-        embed = generate_transfer_report_embed(session.transfer_data)
-        await channel.send(embed=embed)
-        session.state = "FINISHED"
-        thread_manager.remove(channel.id)
-        return
-
-    # TRANSFER midflow
-    if session.state == "TRANSFER_COLLECTING":
-        sub = session.substate
-        if sub == "ASK_SOURCE":
-            session.transfer_data["source"] = message.content.strip()
-            session.substate = "ASK_DEST"
-            await channel.send(f"*\"Source recorded: {session.transfer_data['source']}. Who is the destination?\"*")
-            return
-        if sub == "ASK_DEST":
-            session.transfer_data["destination"] = message.content.strip()
-            session.substate = "ASK_AMOUNT"
-            await channel.send(f"*\"Destination recorded: {session.transfer_data['destination']}. How much would you like to transfer?\"*")
-            return
-        if sub == "ASK_AMOUNT":
-            parsed = parse_money_local(message.content)
-            if parsed is None:
-                await channel.send(f"*\"I couldn't parse that amount — please use formats like 2.5k or 2500.\"*")
-                return
-            session.transfer_data["amount"] = parsed
-            session.substate = "ASK_REASON"
-            await channel.send(f"*\"Amount recorded: {format_money(parsed)}. Any reason/notes for the transfer? (or 'none')\"*")
-            return
-        if sub == "ASK_REASON":
-            session.transfer_data["reason"] = message.content.strip()
-            embed = generate_transfer_report_embed(session.transfer_data)
-            await channel.send(embed=embed)
-            session.state = "FINISHED"
-            thread_manager.remove(channel.id)
-            return
-
-    # LOAN intent
-    if intent == "loan":
-        session.state = "LOAN_COLLECTING"
-        for key in ("player_name", "amount", "purpose", "collateral"):
-            if key in fields and fields[key] is not None:
-                if key == "amount":
-                    try:
-                        session.loan_data[key] = float(fields[key])
-                    except Exception:
-                        session.loan_data[key] = parse_money_local(str(fields[key]))
-                else:
-                    session.loan_data[key] = fields[key]
-        if not session.loan_data["player_name"]:
-            session.substate = "ASK_NAME"
-            await channel.send(f"*\"To begin: what's your character name?\"*")
-            return
-        if session.loan_data["amount"] is None:
-            session.substate = "ASK_AMOUNT"
-            await channel.send(f"*\"How much would you like to request as a loan?\"*")
-            return
-        if not session.loan_data["purpose"]:
-            session.substate = "ASK_PURPOSE"
-            await channel.send(f"*\"What's the purpose of the loan?\"*")
-            return
-        if session.loan_data["collateral"] is None:
-            session.substate = "ASK_COLLATERAL"
-            await channel.send(f"*\"Any collateral? If none, reply 'none'.\"*")
-            return
-        # all present -> ping bank manager
-        embed = generate_loan_notice_embed(session.loan_data, message.author)
-        try:
-            await channel.send(content=f"<@&{BANK_MANAGER_ROLE_ID}> A loan request needs review.", embed=embed)
-        except Exception:
-            await channel.send(embed=embed)
-        session.state = "FINISHED"
-        thread_manager.remove(channel.id)
-        return
-
-    # LOAN midflow handling
-    if session.state == "LOAN_COLLECTING":
-        sub = session.substate
-        if sub == "ASK_NAME":
-            session.loan_data["player_name"] = message.content.strip()
-            session.substate = "ASK_AMOUNT"
-            await channel.send(f"*\"Name recorded. How much would you like to request?\"*")
-            return
-        if sub == "ASK_AMOUNT":
-            parsed = parse_money_local(message.content)
-            if parsed is None:
-                await channel.send("*\"I couldn't parse that amount — try formats like 5k or 5000.\"*")
-                return
-            session.loan_data["amount"] = parsed
-            session.substate = "ASK_PURPOSE"
-            await channel.send("*\"Amount recorded. What's the purpose of the loan?\"*")
-            return
-        if sub == "ASK_PURPOSE":
-            session.loan_data["purpose"] = message.content.strip()
-            session.substate = "ASK_COLLATERAL"
-            await channel.send("*\"Collateral? If none, reply 'none'.\"*")
-            return
-        if sub == "ASK_COLLATERAL":
-            session.loan_data["collateral"] = message.content.strip()
-            embed = generate_loan_notice_embed(session.loan_data, message.author)
-            try:
-                await channel.send(content=f"<@&{BANK_MANAGER_ROLE_ID}> A loan request needs review.", embed=embed)
-            except Exception:
-                await channel.send(embed=embed)
-            session.state = "FINISHED"
-            thread_manager.remove(channel.id)
-            return
-
-    # READY / FINISH handling
-    if intent == "finish" or (session.substate == "READY" and session.state in ("TAX_COLLECTING", "TRANSFER_COLLECTING")):
-        if session.state in ("TAX_COLLECTING", "COMPANY_MENU"):
-            embed = generate_tax_report_embed(session.company_data)
-            await channel.send(embed=embed)
-            session.state = "FINISHED"
-            thread_manager.remove(channel.id)
-            return
-        if session.state == "TRANSFER_COLLECTING":
-            embed = generate_transfer_report_embed(session.transfer_data)
-            await channel.send(embed=embed)
-            session.state = "FINISHED"
-            thread_manager.remove(channel.id)
-            return
-
-    # fallback
-    await channel.send("*\"I'm sorry — I couldn't interpret that. Please state if you want taxes, a transfer, or a loan. Example: 'Calculate taxes for IronWorks — income 12k, expenses 3k'\"*")
-
 # Slash commands (kept and adapted)
 
 def is_admin(interaction: discord.Interaction) -> bool:
@@ -1062,66 +935,13 @@ def format_bracket_range(min_val: float, max_val) -> str:
         return f"${min_val:,.0f}+"
     return f"${min_val:,.0f} - ${max_val:,.0f}"
 
-@bot.event
-async def on_message(message: discord.Message):
-    # Ignore bot messages
-    if message.author.bot:
-        return
-
-    # Only reply when the bot is mentioned
-    if bot.user in message.mentions:
-        try:
-            # typing indicator
-            async with message.channel.typing():
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "You are Kirztin, a friendly and helpful Universalis Bank teller. You speak politely, warmly, and in character."},
-                        {"role": "user", "content": message.content}
-                    ],
-                )
-
-                reply = response.choices[0].message["content"]
-                await message.reply(reply)
-        except Exception as e:
-            await message.reply(f"Error: {e}")
-
-    # VERY IMPORTANT
-    await bot.process_commands(message)
-
-@bot.event
-async def on_message(message: discord.Message):
-    # ignore bots (including yourself)
-    if message.author.bot:
-        return
-
-    # keep commands working
-    await bot.process_commands(message)
-
-    # Only respond inside threads under the watched forum ID
-    if isinstance(message.channel, discord.Thread) and message.channel.parent_id == WATCH_FORUM_ID:
-
-        user_text = message.content.strip()
-        if not user_text:
-            return
-
-        try:
-            # show typing indicator
-            async with message.channel.typing():
-                response = openai.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": f"You are {TELLER_NAME}, a friendly, soft-spoken Universalis Bank teller. Respond warmly, like a person."},
-                        {"role": "user", "content": user_text}
-                    ]
-                )
-                reply = response.choices[0].message.content
-
-        except Exception as e:
-            reply = f"⚠️ AI Error: {e}"
-
-        await message.channel.send(reply)
-        
+# Run the bot
+async def sync_commands():
+    try:
+        await bot.tree.sync()
+        print("Slash commands synced successfully!")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
 
 # Run the bot
 if __name__ == "__main__":
