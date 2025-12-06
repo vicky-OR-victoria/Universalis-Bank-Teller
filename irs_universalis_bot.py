@@ -859,7 +859,7 @@ async def on_thread_create(thread: discord.Thread):
     
     greeting = (
         f"""🏛️ *You walk in a luxurious gilded hall. You are surrounded by people busy with their requests at the bank.. You find an available bank teller and head to her, you spot her tag which says her name: Kirztin.*
-    Note: To close this threat, type in "all done". If you are gone for more than 10 minutes without closing, this thread will automatically close!"""
+Note: To close this threat, type in "all done". If you are gone for more than 10 minutes without closing, this thread will automatically close!"""
     )
     try:
         await thread.send(greeting)
