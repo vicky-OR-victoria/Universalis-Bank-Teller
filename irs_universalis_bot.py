@@ -18,7 +18,7 @@ import openai
 
 # Thread memory storage (thread-based memory, persistent)
 THREAD_MEMORY_FILE = "thread_memory.json"
-MAX_MEMORY_MESSAGES = 60  # total messages (user+assistant) per thread to keep; tweak for token/cost
+MAX_MEMORY_MESSAGES = 60  # total messages (user+assistant)
 
 def _ensure_thread_memory_file():
     if not Path(THREAD_MEMORY_FILE).exists():
@@ -26,9 +26,7 @@ def _ensure_thread_memory_file():
             json.dump({}, f)
 
 def load_thread_memory(thread_id: int) -> List[Dict]:
-    """
-    Returns a list of message dicts (role/content) for the given thread id.
-    """
+    
     _ensure_thread_memory_file()
     try:
         with open(THREAD_MEMORY_FILE, "r") as f:
