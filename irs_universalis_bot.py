@@ -759,6 +759,7 @@ Step 4: Inform the user that the transfer request is officially concluded.
 ------------------------------------------------------------
 GENERAL BEHAVIOR RULES
 ------------------------------------------------------------
+- Don't start sentences with Universalis Bank Teller:
 - Maintain a professional, roleplay-friendly tone unless asked otherwise.
 - Never skip required steps when gathering financial or loan data.
 - Always confirm user inputs before performing calculations.
@@ -857,13 +858,8 @@ async def on_thread_create(thread: discord.Thread):
     save_thread_status(thread.id, datetime.utcnow().isoformat(), completed=False)
     
     greeting = (
-        f"👋 **Welcome to Universalis Bank.**\n"
-        f"I am **{TELLER_NAME}**, your virtual bank teller. How may I assist you today?\n\n"
-        f"Please reply in this thread with what you need! Below are what we are open for service. <3\n"
-        f"- \"Calculation for your company's taxes.\"\n"
-        f"- \"Transfer of funds between companies.\"\n"
-        f"- \"Loan requests.\"\n"
-        f"Just say anything, and I'll respond.\n\n"
+        f"🏛️ *You walk in a luxurious gilded hall. You are surrounded by people busy with their requests at the bank.."
+        f"You find an available bank teller and head to her, you spot her tag which says her name: Kirztin."
         f"*Note: I'll be available for 10 minutes of inactivity. After that, please open a new thread!*"
     )
     try:
