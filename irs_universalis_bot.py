@@ -858,9 +858,8 @@ async def on_thread_create(thread: discord.Thread):
     save_thread_status(thread.id, datetime.utcnow().isoformat(), completed=False)
     
     greeting = (
-        f"🏛️ *You walk in a luxurious gilded hall. You are surrounded by people busy with their requests at the bank.."
-        f"You find an available bank teller and head to her, you spot her tag which says her name: Kirztin."
-        f"*Note: I'll be available for 10 minutes of inactivity. After that, please open a new thread!*"
+        f"🏛️ *You walk in a luxurious gilded hall. You are surrounded by people busy with their requests at the bank.. You find an available bank teller and head to her, you spot her tag which says her name: Kirztin. 
+        -# Note: I'll be available for 10 minutes of inactivity. After that, please open a new thread!*"
     )
     try:
         await thread.send(greeting)
